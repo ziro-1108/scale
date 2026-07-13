@@ -438,10 +438,9 @@ onBeforeUnmount(() => {
     </nav>
 
     <main class="content">
-      <header class="topbar">
+      <header v-if="activeView !== 'dashboard'" class="topbar">
         <div>
-          <p class="eyebrow">Equipment calibration overview</p>
-          <h1>{{ activeView === 'dashboard' ? '운영 대시보드' : activeView === 'upload' ? '관리자 이미지 업로드' : '이미지 리뷰' }}</h1>
+          <h1>{{ activeView === 'upload' ? '관리자 이미지 업로드' : '이미지 리뷰' }}</h1>
         </div>
       </header>
 
