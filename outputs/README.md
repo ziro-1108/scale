@@ -16,6 +16,12 @@ frontend/
 docker-compose.yml     local Docker stack: MySQL, API, worker, frontend
 ```
 
+Database structure:
+
+```text
+DB_SCHEMA.md
+```
+
 ## Docker Quick Start
 
 Run Docker commands from the project output directory:
@@ -58,6 +64,90 @@ frontend   Nginx static frontend, exposed on host port 8080
 ```
 
 The API and worker share the same backend image and the same `scale_storage` volume, so uploaded images and generated thumbnails are visible to both services.
+
+## Ubuntu Background Operation
+
+For an Ubuntu 22.04 server, run SCALE in detached Docker mode:
+
+```bash
+cd /opt/scale/outputs
+docker compose up -d --build
+```
+
+The `-d` option means detached mode. After this command finishes, the terminal can be closed and the containers keep running in the background.
+
+The compose file already uses this restart policy for every service:
+
+```yaml
+restart: unless-stopped
+```
+
+This means Docker will restart `mysql`, `api`, `worker`, and `frontend` if a container exits unexpectedly or Docker restarts. The polling worker is included in Docker:
+
+```yaml
+worker:
+  command: ["python", "-m", "worker.poller"]
+```
+
+Check background status:
+
+```bash
+docker compose ps
+```
+
+Follow worker logs:
+
+```bash
+docker compose logs -f worker
+```
+
+Restart only the worker:
+
+```bash
+docker compose restart worker
+```
+
+Stop everything intentionally:
+
+```bash
+docker compose down
+```
+
+## Ubuntu Boot Auto Start
+
+To make SCALE start automatically after an Ubuntu reboot, register the compose stack with `systemd`.
+
+First, place the project on the server. This README assumes:
+
+```text
+/opt/scale/outputs
+```
+
+If your actual path is different, update `WorkingDirectory` in `deploy/scale-compose.service.example`.
+
+Install the service:
+
+```bash
+sudo cp deploy/scale-compose.service.example /etc/systemd/system/scale-compose.service
+sudo systemctl daemon-reload
+sudo systemctl enable scale-compose.service
+sudo systemctl start scale-compose.service
+```
+
+Check service status:
+
+```bash
+sudo systemctl status scale-compose.service
+docker compose ps
+```
+
+After this setup, Ubuntu can reboot and Docker will bring SCALE back in the background. For normal code updates, run:
+
+```bash
+cd /opt/scale/outputs
+git pull
+docker compose up -d --build
+```
 
 ## Docker Service Commands
 
