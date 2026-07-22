@@ -13,15 +13,29 @@ import {
 } from '@lucide/vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-const today = new Date().toISOString().slice(0, 10)
-const twoWeeksAgo = new Date(Date.now() - 13 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+function formatLocalDate(value) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function localDateDaysAgo(days) {
+  const value = new Date()
+  value.setHours(0, 0, 0, 0)
+  value.setDate(value.getDate() - days)
+  return formatLocalDate(value)
+}
+
+const today = formatLocalDate(new Date())
+const defaultStartDate = localDateDaysAgo(14)
 
 const activeView = ref('dashboard')
 const loading = ref(false)
 const apiWarning = ref('')
 const equipments = ref([])
 const dashboard = ref({ range: {}, trend: [], trend_series: [], equipment_status: [] })
-const filters = reactive({ start_date: twoWeeksAgo, end_date: today, status_date: today })
+const filters = reactive({ start_date: defaultStartDate, end_date: today, status_date: today })
 const issueModal = reactive({
   open: false,
   issue_id: null,
@@ -39,6 +53,10 @@ const highChartRef = ref(null)
 const middleChartRef = ref(null)
 const chartLoadError = ref('')
 const plotlyReady = reactive({ high: false, middle: false })
+const chartTooltips = reactive({
+  high: { visible: false, x: 0, y: 0, date: '', rows: [] },
+  middle: { visible: false, x: 0, y: 0, date: '', rows: [] }
+})
 let plotlyLoadPromise = null
 
 const sampleEquipments = [
@@ -49,11 +67,13 @@ const sampleEquipments = [
 ]
 
 function sampleDashboard() {
-  const trend = Array.from({ length: 14 }, (_, index) => {
-    const d = new Date(Date.now() - (13 - index) * 24 * 60 * 60 * 1000)
+  const trend = Array.from({ length: 15 }, (_, index) => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    d.setDate(d.getDate() - (14 - index))
     const wave = Math.sin(index / 2.2)
     return {
-      date: d.toISOString().slice(0, 10),
+      date: formatLocalDate(d),
       high_avg_error: Number((wave * 0.42 + 0.08).toFixed(3)),
       middle_avg_error: Number((Math.cos(index / 2.7) * 0.34 - 0.05).toFixed(3)),
       high_count: 3 + (index % 3),
@@ -62,7 +82,7 @@ function sampleDashboard() {
     }
   })
   return {
-    range: { start_date: twoWeeksAgo, end_date: today, status_date: today },
+    range: { start_date: defaultStartDate, end_date: today, status_date: today },
     trend,
     trend_series: [
       {
@@ -322,6 +342,18 @@ function aggregateFallbackSeries(valueKey) {
   ]
 }
 
+function hasAverageError(point) {
+  return point.avg_error !== null && point.avg_error !== undefined && Number.isFinite(Number(point.avg_error))
+}
+
+function formatPointHover(point, equipmentName) {
+  return [
+    `Date: ${point.date}`,
+    `Equipment: ${equipmentName}`,
+    `Average error: ${Number(point.avg_error).toFixed(4)}`
+  ].join('<br>')
+}
+
 function buildPlotConfig(magnification, fallbackKey) {
   const sourceSeries =
     dashboard.value.trend_series?.filter((series) => series.magnification === magnification) || []
@@ -329,17 +361,17 @@ function buildPlotConfig(magnification, fallbackKey) {
   const numericValues = seriesList
     .flatMap((series) => series.points || [])
     .map((point) => point.avg_error)
-    .filter((value) => value !== null && value !== undefined)
+    .filter((value) => value !== null && value !== undefined && Number.isFinite(Number(value)))
   const maxAbs = Math.max(1.5, ...numericValues.map((value) => Math.abs(value)))
   const yLimit = Math.min(24, Math.max(1.5, Number((maxAbs * 1.12).toFixed(1))))
   const traces = seriesList.map((series, index) => {
     const color = chartColors[index % chartColors.length]
-    const points = series.points || []
+    const points = (series.points || []).filter(hasAverageError)
     return {
       name: series.equipment_name,
       x: points.map((point) => point.date),
-      y: points.map((point) => point.avg_error),
-      customdata: points.map((point) => point.count),
+      y: points.map((point) => Number(point.avg_error)),
+      text: points.map((point) => formatPointHover(point, series.equipment_name)),
       type: 'scatter',
       mode: 'lines+markers',
       connectgaps: false,
@@ -349,7 +381,7 @@ function buildPlotConfig(magnification, fallbackKey) {
         size: 7,
         line: { color: '#ffffff', width: 1.5 }
       },
-      hovertemplate: '%{fullData.name}<br>%{x}<br>Error %{y:.4f}<br>Count %{customdata}<extra></extra>'
+      hoverinfo: 'none'
     }
   })
   const layout = {
@@ -359,6 +391,13 @@ function buildPlotConfig(magnification, fallbackKey) {
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: '#fbfdff',
     hovermode: 'x unified',
+    hoverdistance: 180,
+    spikedistance: 180,
+    hoverlabel: {
+      bgcolor: '#ffffff',
+      bordercolor: '#d0d5dd',
+      font: { color: '#344054', size: 12 }
+    },
     showlegend: true,
     legend: {
       orientation: 'h',
@@ -371,6 +410,7 @@ function buildPlotConfig(magnification, fallbackKey) {
     xaxis: {
       type: 'date',
       tickformat: '%m-%d',
+      hoverformat: '%Y-%m-%d',
       gridcolor: '#edf2f7',
       zeroline: false,
       linecolor: '#d9e2ec',
@@ -425,6 +465,46 @@ function buildPlotConfig(magnification, fallbackKey) {
   return { data: traces, layout }
 }
 
+function clearChartTooltip(chartKey) {
+  chartTooltips[chartKey].visible = false
+}
+
+function showChartTooltip(chartKey, eventData) {
+  const points = (eventData.points || []).filter((point) =>
+    point.y !== null && point.y !== undefined && Number.isFinite(Number(point.y))
+  )
+  if (!points.length) {
+    clearChartTooltip(chartKey)
+    return
+  }
+
+  const chartElement = chartKey === 'high' ? highChartRef.value : middleChartRef.value
+  const chartFrame = chartElement?.closest('.plotly-frame')
+  const rect = chartFrame?.getBoundingClientRect()
+  const event = eventData.event
+  const tooltipWidth = 230
+  const nextX = rect && event ? event.clientX - rect.left + 14 : 16
+  const nextY = rect && event ? event.clientY - rect.top + 14 : 16
+
+  Object.assign(chartTooltips[chartKey], {
+    visible: true,
+    x: rect ? Math.min(Math.max(12, nextX), Math.max(12, rect.width - tooltipWidth)) : nextX,
+    y: rect ? Math.min(Math.max(12, nextY), Math.max(12, rect.height - 120)) : nextY,
+    date: String(points[0].x),
+    rows: points.map((point) => ({
+      equipment: point.data?.name || 'Equipment',
+      value: Number(point.y).toFixed(4)
+    }))
+  })
+}
+
+function attachChartEvents(chartElement, chartKey) {
+  if (!chartElement || chartElement.__scaleTooltipBound) return
+  chartElement.on('plotly_hover', (eventData) => showChartTooltip(chartKey, eventData))
+  chartElement.on('plotly_unhover', () => clearChartTooltip(chartKey))
+  chartElement.__scaleTooltipBound = true
+}
+
 function loadPlotly() {
   if (window.Plotly) return Promise.resolve(window.Plotly)
   if (plotlyLoadPromise) return plotlyLoadPromise
@@ -463,11 +543,13 @@ async function renderCharts() {
   if (highChartRef.value) {
     const high = buildPlotConfig('HIGH', 'high_avg_error')
     await plotly.react(highChartRef.value, high.data, high.layout, options)
+    attachChartEvents(highChartRef.value, 'high')
     plotlyReady.high = true
   }
   if (middleChartRef.value) {
     const middle = buildPlotConfig('MIDDLE', 'middle_avg_error')
     await plotly.react(middleChartRef.value, middle.data, middle.layout, options)
+    attachChartEvents(middleChartRef.value, 'middle')
     plotlyReady.middle = true
   }
 }
@@ -562,21 +644,33 @@ onBeforeUnmount(() => {
                 <h2>고배율 Calibration 현황</h2>
               </div>
             </div>
-            <div ref="highChartRef" class="plotly-chart">
-              <svg v-if="!plotlyReady.high" class="fallback-chart" :viewBox="`0 0 ${fallbackChart.width} ${fallbackChart.height}`" role="img">
-                <rect :x="fallbackChart.pad.left" :y="fallbackChart.y(1)" :width="fallbackChart.width - fallbackChart.pad.left - fallbackChart.pad.right" :height="fallbackChart.y(-1) - fallbackChart.y(1)" class="normal-band" />
-                <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(1)" :y2="fallbackChart.y(1)" class="limit" />
-                <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(-1)" :y2="fallbackChart.y(-1)" class="limit" />
-                <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(0)" :y2="fallbackChart.y(0)" class="zero" />
-                <polyline :points="fallbackChart.high" class="line high-line" />
-                <g v-for="(row, i) in fallbackChart.rows" :key="`high-fallback-${row.date}`">
-                  <circle v-if="row.high_avg_error !== null" :cx="fallbackChart.x(i)" :cy="fallbackChart.y(row.high_avg_error)" r="4" class="dot high-dot" />
-                  <text v-if="i % 2 === 0 || fallbackChart.rows.length < 10" :x="fallbackChart.x(i)" y="264" text-anchor="middle">{{ row.date.slice(5) }}</text>
-                </g>
-                <text x="8" :y="fallbackChart.y(1) + 4">+1</text>
-                <text x="8" :y="fallbackChart.y(0) + 4">0</text>
-                <text x="8" :y="fallbackChart.y(-1) + 4">-1</text>
-              </svg>
+            <div class="plotly-frame" @mouseleave="clearChartTooltip('high')">
+              <div ref="highChartRef" class="plotly-chart">
+                <svg v-if="!plotlyReady.high" class="fallback-chart" :viewBox="`0 0 ${fallbackChart.width} ${fallbackChart.height}`" role="img">
+                  <rect :x="fallbackChart.pad.left" :y="fallbackChart.y(1)" :width="fallbackChart.width - fallbackChart.pad.left - fallbackChart.pad.right" :height="fallbackChart.y(-1) - fallbackChart.y(1)" class="normal-band" />
+                  <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(1)" :y2="fallbackChart.y(1)" class="limit" />
+                  <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(-1)" :y2="fallbackChart.y(-1)" class="limit" />
+                  <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(0)" :y2="fallbackChart.y(0)" class="zero" />
+                  <polyline :points="fallbackChart.high" class="line high-line" />
+                  <g v-for="(row, i) in fallbackChart.rows" :key="`high-fallback-${row.date}`">
+                    <circle v-if="row.high_avg_error !== null" :cx="fallbackChart.x(i)" :cy="fallbackChart.y(row.high_avg_error)" r="4" class="dot high-dot" />
+                    <text v-if="i % 2 === 0 || fallbackChart.rows.length < 10" :x="fallbackChart.x(i)" y="264" text-anchor="middle">{{ row.date.slice(5) }}</text>
+                  </g>
+                  <text x="8" :y="fallbackChart.y(1) + 4">+1</text>
+                  <text x="8" :y="fallbackChart.y(0) + 4">0</text>
+                  <text x="8" :y="fallbackChart.y(-1) + 4">-1</text>
+                </svg>
+              </div>
+              <div
+                v-if="chartTooltips.high.visible"
+                class="chart-tooltip"
+                :style="{ left: `${chartTooltips.high.x}px`, top: `${chartTooltips.high.y}px` }"
+              >
+                <strong>{{ chartTooltips.high.date }}</strong>
+                <span v-for="row in chartTooltips.high.rows" :key="`high-tip-${row.equipment}`">
+                  {{ row.equipment }}: {{ row.value }}
+                </span>
+              </div>
             </div>
           </section>
 
@@ -586,21 +680,33 @@ onBeforeUnmount(() => {
                 <h2>중배율 Calibration 현황</h2>
               </div>
             </div>
-            <div ref="middleChartRef" class="plotly-chart">
-              <svg v-if="!plotlyReady.middle" class="fallback-chart" :viewBox="`0 0 ${fallbackChart.width} ${fallbackChart.height}`" role="img">
-                <rect :x="fallbackChart.pad.left" :y="fallbackChart.y(1)" :width="fallbackChart.width - fallbackChart.pad.left - fallbackChart.pad.right" :height="fallbackChart.y(-1) - fallbackChart.y(1)" class="normal-band" />
-                <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(1)" :y2="fallbackChart.y(1)" class="limit" />
-                <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(-1)" :y2="fallbackChart.y(-1)" class="limit" />
-                <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(0)" :y2="fallbackChart.y(0)" class="zero" />
-                <polyline :points="fallbackChart.middle" class="line middle-line" />
-                <g v-for="(row, i) in fallbackChart.rows" :key="`middle-fallback-${row.date}`">
-                  <circle v-if="row.middle_avg_error !== null" :cx="fallbackChart.x(i)" :cy="fallbackChart.y(row.middle_avg_error)" r="4" class="dot middle-dot" />
-                  <text v-if="i % 2 === 0 || fallbackChart.rows.length < 10" :x="fallbackChart.x(i)" y="264" text-anchor="middle">{{ row.date.slice(5) }}</text>
-                </g>
-                <text x="8" :y="fallbackChart.y(1) + 4">+1</text>
-                <text x="8" :y="fallbackChart.y(0) + 4">0</text>
-                <text x="8" :y="fallbackChart.y(-1) + 4">-1</text>
-              </svg>
+            <div class="plotly-frame" @mouseleave="clearChartTooltip('middle')">
+              <div ref="middleChartRef" class="plotly-chart">
+                <svg v-if="!plotlyReady.middle" class="fallback-chart" :viewBox="`0 0 ${fallbackChart.width} ${fallbackChart.height}`" role="img">
+                  <rect :x="fallbackChart.pad.left" :y="fallbackChart.y(1)" :width="fallbackChart.width - fallbackChart.pad.left - fallbackChart.pad.right" :height="fallbackChart.y(-1) - fallbackChart.y(1)" class="normal-band" />
+                  <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(1)" :y2="fallbackChart.y(1)" class="limit" />
+                  <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(-1)" :y2="fallbackChart.y(-1)" class="limit" />
+                  <line :x1="fallbackChart.pad.left" :x2="fallbackChart.width - fallbackChart.pad.right" :y1="fallbackChart.y(0)" :y2="fallbackChart.y(0)" class="zero" />
+                  <polyline :points="fallbackChart.middle" class="line middle-line" />
+                  <g v-for="(row, i) in fallbackChart.rows" :key="`middle-fallback-${row.date}`">
+                    <circle v-if="row.middle_avg_error !== null" :cx="fallbackChart.x(i)" :cy="fallbackChart.y(row.middle_avg_error)" r="4" class="dot middle-dot" />
+                    <text v-if="i % 2 === 0 || fallbackChart.rows.length < 10" :x="fallbackChart.x(i)" y="264" text-anchor="middle">{{ row.date.slice(5) }}</text>
+                  </g>
+                  <text x="8" :y="fallbackChart.y(1) + 4">+1</text>
+                  <text x="8" :y="fallbackChart.y(0) + 4">0</text>
+                  <text x="8" :y="fallbackChart.y(-1) + 4">-1</text>
+                </svg>
+              </div>
+              <div
+                v-if="chartTooltips.middle.visible"
+                class="chart-tooltip"
+                :style="{ left: `${chartTooltips.middle.x}px`, top: `${chartTooltips.middle.y}px` }"
+              >
+                <strong>{{ chartTooltips.middle.date }}</strong>
+                <span v-for="row in chartTooltips.middle.rows" :key="`middle-tip-${row.equipment}`">
+                  {{ row.equipment }}: {{ row.value }}
+                </span>
+              </div>
             </div>
           </section>
         </div>

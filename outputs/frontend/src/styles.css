@@ -316,10 +316,43 @@ textarea {
   gap: 16px;
 }
 
+.plotly-frame {
+  position: relative;
+}
+
 .plotly-chart {
   width: 100%;
   min-height: 310px;
   margin-top: 8px;
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 8;
+  width: 230px;
+  max-width: calc(100% - 24px);
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  color: #344054;
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.chart-tooltip strong {
+  color: #101828;
+  font-size: 12px;
+}
+
+.chart-tooltip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fallback-chart {
