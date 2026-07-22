@@ -15,6 +15,47 @@ equipment_issues            설비 이슈/점검 상태 기간 등록
 daily_calibration_overrides 이미지 리뷰에서 선택한 결과 평균값
 ```
 
+## 기존 DB 구조와 새 구조 매핑
+
+기존 시스템의 테이블 구조는 아래와 같이 새 구조로 정리됩니다.
+
+| 기존 테이블 | 기존 역할 | 새 테이블 | 변경 이유 |
+| --- | --- | --- | --- |
+| `facility` | 설비 마스터 | `equipments` | 설비명 외에도 활성 여부, 생성일 등 관리 가능 |
+| `calib_queue` | task_id polling queue | `measurement_tasks` | queue 상태, 재시도, lock, 오류 기록을 함께 관리 |
+| `log` | 고배율 H 결과 | `measurement_results` | H/M 결과를 하나의 테이블에 저장하고 `magnification`으로 구분 |
+| `log2` | 중배율 M 결과 | `measurement_results` | 결과 조회/평균/리뷰 로직을 단순화 |
+| 없음 | 이미지/썸네일 관리 | `measurement_images` | 원본 이미지와 256x256 썸네일 조회를 위해 추가 |
+| 없음 | 설비 이슈 기간 관리 | `equipment_issues` | 고장/점검/촬영 이슈를 대시보드에 표시하기 위해 추가 |
+| 없음 | 이미지 선택 평균값 | `daily_calibration_overrides` | 잘못 촬영된 이미지 제외 후 일자 평균을 재정의하기 위해 추가 |
+
+기존 Desktop Application이 보내던 payload는 새 API에서도 받을 수 있도록 호환됩니다.
+
+```json
+{
+  "Facility": "EQP-01",
+  "task_id": "external-task-id",
+  "date": "2026-07-22",
+  "Magtype": "H"
+}
+```
+
+내부 저장 시 `Magtype` 값은 아래처럼 정규화됩니다.
+
+```text
+H      -> HIGH
+M      -> MIDDLE
+HIGH   -> HIGH
+MIDDLE -> MIDDLE
+```
+
+기존 `log`/`log2`처럼 배율별로 테이블을 나누지 않고, 새 구조에서는 한 테이블에 저장합니다.
+
+```text
+measurement_results.magnification = "HIGH"   기존 log
+measurement_results.magnification = "MIDDLE" 기존 log2
+```
+
 ## ERD
 
 ```mermaid

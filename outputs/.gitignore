@@ -1,5 +1,4 @@
 backend/.env
-backend/scale_dev.db
 backend/storage/uploads/*
 backend/storage/thumbnails/*
 !backend/storage/uploads/.gitkeep

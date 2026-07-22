@@ -1,9 +1,0 @@
-__pycache__/
-*.py[cod]
-.venv/
-scale_dev.db
-.env
-storage/uploads/*
-storage/thumbnails/*
-!storage/uploads/.gitkeep
-!storage/thumbnails/.gitkeep

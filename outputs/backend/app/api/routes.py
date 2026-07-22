@@ -126,6 +126,8 @@ def dashboard(
     start = start_date or (end - timedelta(days=13))
     check_date = status_date or end
 
+    equipments = db.query(Equipment).order_by(Equipment.name).all()
+
     result_rows = (
         db.query(
             MeasurementResult.measured_date,
@@ -140,6 +142,32 @@ def dashboard(
             MeasurementResult.is_selected_for_daily_average.is_(True),
         )
         .group_by(MeasurementResult.measured_date, MeasurementResult.magnification)
+        .all()
+    )
+
+    series_rows = (
+        db.query(
+            MeasurementResult.measured_date,
+            MeasurementResult.equipment_id,
+            Equipment.name,
+            MeasurementResult.magnification,
+            func.avg(MeasurementResult.error_value),
+            func.avg(MeasurementResult.distortion_value),
+            func.count(MeasurementResult.id),
+            func.sum(func.abs(MeasurementResult.error_value) > 1.0),
+        )
+        .join(Equipment, Equipment.id == MeasurementResult.equipment_id)
+        .filter(
+            MeasurementResult.measured_date.between(start, end),
+            MeasurementResult.is_selected_for_daily_average.is_(True),
+        )
+        .group_by(
+            MeasurementResult.measured_date,
+            MeasurementResult.equipment_id,
+            Equipment.name,
+            MeasurementResult.magnification,
+        )
+        .order_by(Equipment.name, MeasurementResult.magnification, MeasurementResult.measured_date)
         .all()
     )
 
@@ -167,7 +195,67 @@ def dashboard(
         item[f"{key}_count"] = int(count or 0)
         item["outlier_count"] += int(outliers or 0)
 
-    equipments = db.query(Equipment).order_by(Equipment.name).all()
+    date_points = [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
+    series_by_key: dict[tuple[int, str], dict] = {}
+    for equipment in equipments:
+        for mag in ("HIGH", "MIDDLE"):
+            series_by_key[(equipment.id, mag)] = {
+                "equipment_id": equipment.id,
+                "equipment_name": equipment.name,
+                "magnification": mag,
+                "points": {
+                    point_date: {
+                        "date": point_date.isoformat(),
+                        "avg_error": None,
+                        "avg_distortion": None,
+                        "count": 0,
+                        "outlier_count": 0,
+                    }
+                    for point_date in date_points
+                },
+                "total_count": 0,
+            }
+
+    for row_date, equipment_id, equipment_name, mag, avg_error, avg_distortion, count, outliers in series_rows:
+        series = series_by_key.setdefault(
+            (equipment_id, mag),
+            {
+                "equipment_id": equipment_id,
+                "equipment_name": equipment_name,
+                "magnification": mag,
+                "points": {
+                    point_date: {
+                        "date": point_date.isoformat(),
+                        "avg_error": None,
+                        "avg_distortion": None,
+                        "count": 0,
+                        "outlier_count": 0,
+                    }
+                    for point_date in date_points
+                },
+                "total_count": 0,
+            },
+        )
+        series["points"][row_date] = {
+            "date": row_date.isoformat(),
+            "avg_error": round(float(avg_error), 4) if avg_error is not None else None,
+            "avg_distortion": round(float(avg_distortion), 4) if avg_distortion is not None else None,
+            "count": int(count or 0),
+            "outlier_count": int(outliers or 0),
+        }
+        series["total_count"] += int(count or 0)
+
+    trend_series = [
+        {
+            "equipment_id": series["equipment_id"],
+            "equipment_name": series["equipment_name"],
+            "magnification": series["magnification"],
+            "points": list(series["points"].values()),
+        }
+        for series in series_by_key.values()
+        if series["total_count"] > 0
+    ]
+
     result_count_rows = (
         db.query(
             MeasurementResult.equipment_id,
@@ -253,6 +341,7 @@ def dashboard(
             "status_date": check_date.isoformat(),
         },
         "trend": list(trend_by_date.values()),
+        "trend_series": trend_series,
         "equipment_status": equipment_status,
     }
 

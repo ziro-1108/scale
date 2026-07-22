@@ -1,0 +1,16 @@
+[Unit]
+Description=SCALE polling worker
+After=network-online.target scale-api.service
+Wants=network-online.target
+
+[Service]
+User=scale
+Group=scale
+WorkingDirectory=/opt/scale/outputs/backend
+EnvironmentFile=/opt/scale/outputs/backend/.env
+ExecStart=/opt/scale/outputs/backend/.venv/bin/python -m worker.poller
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

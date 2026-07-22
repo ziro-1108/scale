@@ -20,7 +20,7 @@ const activeView = ref('dashboard')
 const loading = ref(false)
 const apiWarning = ref('')
 const equipments = ref([])
-const dashboard = ref({ range: {}, trend: [], equipment_status: [] })
+const dashboard = ref({ range: {}, trend: [], trend_series: [], equipment_status: [] })
 const filters = reactive({ start_date: twoWeeksAgo, end_date: today, status_date: today })
 const issueModal = reactive({
   open: false,
@@ -64,6 +64,44 @@ function sampleDashboard() {
   return {
     range: { start_date: twoWeeksAgo, end_date: today, status_date: today },
     trend,
+    trend_series: [
+      {
+        equipment_id: 1,
+        equipment_name: 'SCALE-A01',
+        magnification: 'HIGH',
+        points: trend.map((row) => ({
+          date: row.date,
+          avg_error: row.high_avg_error,
+          avg_distortion: 0.12,
+          count: row.high_count,
+          outlier_count: row.outlier_count
+        }))
+      },
+      {
+        equipment_id: 2,
+        equipment_name: 'SCALE-B07',
+        magnification: 'HIGH',
+        points: trend.map((row, index) => ({
+          date: row.date,
+          avg_error: Number(((row.high_avg_error ?? 0) + 0.16 + Math.sin(index / 3) * 0.06).toFixed(3)),
+          avg_distortion: 0.15,
+          count: row.high_count,
+          outlier_count: 0
+        }))
+      },
+      {
+        equipment_id: 1,
+        equipment_name: 'SCALE-A01',
+        magnification: 'MIDDLE',
+        points: trend.map((row) => ({
+          date: row.date,
+          avg_error: row.middle_avg_error,
+          avg_distortion: 0.11,
+          count: row.middle_count,
+          outlier_count: row.outlier_count
+        }))
+      }
+    ],
     equipment_status: [
       { equipment_id: 1, equipment_name: 'SCALE-A01', high_task_count: 3, middle_task_count: 3, high_count: 3, middle_count: 3, image_registered: true, completed: true, status: 'completed', issues: [] },
       { equipment_id: 2, equipment_name: 'SCALE-B07', high_task_count: 3, middle_task_count: 3, high_count: 2, middle_count: 3, image_registered: true, completed: false, status: 'registered', issues: [] },
@@ -257,26 +295,63 @@ const fallbackChart = computed(() => {
   return { rows, width, height, pad, x, y, high: line('high_avg_error'), middle: line('middle_avg_error') }
 })
 
-function buildPlotConfig(valueKey, color) {
+const chartColors = [
+  '#1769e0',
+  '#14a085',
+  '#e85d04',
+  '#7c3aed',
+  '#d6336c',
+  '#0f766e',
+  '#64748b',
+  '#b45309',
+  '#2563eb',
+  '#059669'
+]
+
+function aggregateFallbackSeries(valueKey) {
   const rows = dashboard.value.trend || []
-  const dates = rows.map((row) => row.date)
-  const values = rows.map((row) => row[valueKey])
-  const numericValues = values.filter((value) => value !== null && value !== undefined)
+  return [
+    {
+      equipment_name: 'Overall',
+      points: rows.map((row) => ({
+        date: row.date,
+        avg_error: row[valueKey],
+        count: row[valueKey] === null || row[valueKey] === undefined ? 0 : 1
+      }))
+    }
+  ]
+}
+
+function buildPlotConfig(magnification, fallbackKey) {
+  const sourceSeries =
+    dashboard.value.trend_series?.filter((series) => series.magnification === magnification) || []
+  const seriesList = sourceSeries.length ? sourceSeries : aggregateFallbackSeries(fallbackKey)
+  const numericValues = seriesList
+    .flatMap((series) => series.points || [])
+    .map((point) => point.avg_error)
+    .filter((value) => value !== null && value !== undefined)
   const maxAbs = Math.max(1.5, ...numericValues.map((value) => Math.abs(value)))
   const yLimit = Math.min(24, Math.max(1.5, Number((maxAbs * 1.12).toFixed(1))))
-  const trace = {
-    x: dates,
-    y: values,
-    type: 'scatter',
-    mode: 'lines+markers',
-    line: { color, width: 3, shape: 'spline', smoothing: 0.65 },
-    marker: {
-      color,
-      size: 8,
-      line: { color: '#ffffff', width: 2 }
-    },
-    hovertemplate: '%{x}<br>Error %{y:.4f}<extra></extra>'
-  }
+  const traces = seriesList.map((series, index) => {
+    const color = chartColors[index % chartColors.length]
+    const points = series.points || []
+    return {
+      name: series.equipment_name,
+      x: points.map((point) => point.date),
+      y: points.map((point) => point.avg_error),
+      customdata: points.map((point) => point.count),
+      type: 'scatter',
+      mode: 'lines+markers',
+      connectgaps: false,
+      line: { color, width: 2.5, shape: 'spline', smoothing: 0.65 },
+      marker: {
+        color,
+        size: 7,
+        line: { color: '#ffffff', width: 1.5 }
+      },
+      hovertemplate: '%{fullData.name}<br>%{x}<br>Error %{y:.4f}<br>Count %{customdata}<extra></extra>'
+    }
+  })
   const layout = {
     autosize: true,
     height: 310,
@@ -284,7 +359,15 @@ function buildPlotConfig(valueKey, color) {
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: '#fbfdff',
     hovermode: 'x unified',
-    showlegend: false,
+    showlegend: true,
+    legend: {
+      orientation: 'h',
+      x: 0,
+      xanchor: 'left',
+      y: 1.08,
+      yanchor: 'bottom',
+      font: { color: '#475467', size: 11 }
+    },
     xaxis: {
       type: 'date',
       tickformat: '%m-%d',
@@ -339,7 +422,7 @@ function buildPlotConfig(valueKey, color) {
       }
     ]
   }
-  return { data: [trace], layout }
+  return { data: traces, layout }
 }
 
 function loadPlotly() {
@@ -378,19 +461,19 @@ async function renderCharts() {
   if (!plotly) return
   const options = { displayModeBar: false, responsive: true }
   if (highChartRef.value) {
-    const high = buildPlotConfig('high_avg_error', '#1769e0')
+    const high = buildPlotConfig('HIGH', 'high_avg_error')
     await plotly.react(highChartRef.value, high.data, high.layout, options)
     plotlyReady.high = true
   }
   if (middleChartRef.value) {
-    const middle = buildPlotConfig('middle_avg_error', '#14a085')
+    const middle = buildPlotConfig('MIDDLE', 'middle_avg_error')
     await plotly.react(middleChartRef.value, middle.data, middle.layout, options)
     plotlyReady.middle = true
   }
 }
 
 watch(
-  () => [dashboard.value.trend, activeView.value],
+  () => [dashboard.value.trend, dashboard.value.trend_series, activeView.value],
   () => renderCharts(),
   { deep: true }
 )

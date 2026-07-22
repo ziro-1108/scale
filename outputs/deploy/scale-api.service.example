@@ -1,0 +1,16 @@
+[Unit]
+Description=SCALE FastAPI backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=scale
+Group=scale
+WorkingDirectory=/opt/scale/outputs/backend
+EnvironmentFile=/opt/scale/outputs/backend/.env
+ExecStart=/opt/scale/outputs/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

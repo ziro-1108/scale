@@ -23,10 +23,7 @@ load_env_file()
 
 class Settings:
     app_name: str = os.getenv("APP_NAME", "SCALE")
-    database_url: str = os.getenv(
-        "DATABASE_URL",
-        f"sqlite:///{(BACKEND_ROOT / 'scale_dev.db').as_posix()}",
-    )
+    database_url: str = os.getenv("DATABASE_URL", "")
     cors_origins: list[str] = [
         origin.strip()
         for origin in os.getenv(
@@ -62,6 +59,10 @@ class Settings:
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
+    if not settings.database_url:
+        raise RuntimeError("DATABASE_URL is required. Use a Cloud MySQL SQLAlchemy URL.")
+    if not settings.database_url.startswith("mysql+"):
+        raise RuntimeError("Only Cloud MySQL SQLAlchemy URLs are supported.")
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
     settings.thumbnails_dir.mkdir(parents=True, exist_ok=True)
     return settings

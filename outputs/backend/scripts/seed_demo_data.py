@@ -19,6 +19,7 @@ intentionally want demo data there.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import json
 
 from app.db.session import Base, SessionLocal, engine
 from app.models.entities import Equipment, EquipmentIssue, MeasurementResult, MeasurementTask
@@ -31,6 +32,7 @@ EQUIPMENT_NAMES = [
     "DEMO-SCALE-C03",
     "DEMO-SCALE-D04",
 ]
+printed_result_header = False
 
 
 def utcnow() -> datetime:
@@ -46,6 +48,16 @@ def get_or_create_equipment(db, name: str) -> Equipment:
     db.add(equipment)
     db.flush()
     return equipment
+
+
+def print_measurement_result_row(row: dict) -> None:
+    """Show the exact measurement_results payload before it is inserted."""
+
+    global printed_result_header
+    if not printed_result_header:
+        print("\nmeasurement_results rows to insert:")
+        printed_result_header = True
+    print(json.dumps(row, ensure_ascii=False, default=str))
 
 
 def create_task_with_optional_result(
@@ -94,16 +106,29 @@ def create_task_with_optional_result(
     if create_result:
         existing = db.query(MeasurementResult).filter(MeasurementResult.task_id == task.id).one_or_none()
         if not existing:
+            result_row = {
+                "task_id": task.id,
+                "external_task_id": task.external_task_id,
+                "equipment_id": equipment.id,
+                "equipment_name": equipment.name,
+                "measured_date": measured_date,
+                "magnification": magnification,
+                "error_value": error_value,
+                "distortion_value": distortion_value,
+                "is_selected_for_daily_average": True,
+                "source": "demo",
+            }
+            print_measurement_result_row(result_row)
             db.add(
                 MeasurementResult(
-                    task_id=task.id,
-                    equipment_id=equipment.id,
-                    measured_date=measured_date,
-                    magnification=magnification,
-                    error_value=error_value,
-                    distortion_value=distortion_value,
-                    is_selected_for_daily_average=True,
-                    source="demo",
+                    task_id=result_row["task_id"],
+                    equipment_id=result_row["equipment_id"],
+                    measured_date=result_row["measured_date"],
+                    magnification=result_row["magnification"],
+                    error_value=result_row["error_value"],
+                    distortion_value=result_row["distortion_value"],
+                    is_selected_for_daily_average=result_row["is_selected_for_daily_average"],
+                    source=result_row["source"],
                 )
             )
 
