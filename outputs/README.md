@@ -141,11 +141,18 @@ sudo systemctl restart scale-worker.service
 
 ## Frontend
 
+The frontend dependency set is pinned for the company runtime:
+
+```text
+Node.js >= 12.22.9
+npm >= 8.5.1
+```
+
 Local development:
 
 ```bash
 cd frontend
-npm.cmd install
+npm.cmd ci
 npm.cmd run dev
 ```
 
@@ -159,7 +166,7 @@ Production build:
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run build
 ```
 

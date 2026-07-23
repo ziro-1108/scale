@@ -8,13 +8,17 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
+  "engines": {
+    "node": ">=12.22.9",
+    "npm": ">=8.5.1"
+  },
   "dependencies": {
-    "@vitejs/plugin-vue": "^5.0.5",
-    "axios": "^1.7.2",
-    "@lucide/vue": "^1.24.0",
-    "plotly.js-basic-dist-min": "^2.35.2",
-    "vite": "^5.3.1",
-    "vue": "^3.4.29"
+    "@lucide/vue": "1.24.0",
+    "@vitejs/plugin-vue": "2.3.4",
+    "axios": "1.7.2",
+    "plotly.js-basic-dist-min": "2.35.2",
+    "vite": "2.9.18",
+    "vue": "3.2.47"
   },
   "devDependencies": {}
 }
